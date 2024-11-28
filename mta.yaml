@@ -1,113 +1,195 @@
 _schema-version: 3.3.0
 ID: extensiblity
+description: A simple CAP project.
 version: 1.0.0
-description: "A simple CAP project."
+modules:
+- name: extensiblity-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: extensiblity-db
+  - name: extensiblity-auth
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    readiness-health-check-http-endpoint: /health
+    readiness-health-check-type: http
+  build-parameters:
+    builder: npm
+- name: extensiblity-mtx
+  type: nodejs
+  path: gen/mtx/sidecar
+  requires:
+  - name: extensiblity-auth
+  - name: extensiblity-registry
+  - name: app-api
+    properties:
+      SUBSCRIPTION_URL: ~{app-protocol}://\${tenant_subdomain}-~{app-uri}
+  - name: extensiblity-db
+  - name: extensiblity-html5-runtime
+  provides:
+  - name: mtx-api
+    properties:
+      mtx-url: ${default-url}
+  
+  parameters:
+    disk-quota: 512M
+    memory: 256M
+  build-parameters:
+    builder: npm-ci
+- name: extensiblity
+  type: approuter.nodejs
+  path: app/router
+  properties:
+    TENANT_HOST_PATTERN: ^(.*)-${default-uri}
+  requires:
+  - name: srv-api
+    group: destinations
+    properties:
+      forwardAuthToken: true
+      name: srv-api
+      url: ~{srv-url}
+  - name: mtx-api
+    group: destinations
+    properties:
+      name: mtx-api
+      url: ~{mtx-url}
+  - name: extensiblity-auth
+  - name: extensiblity-html5-runtime
+  - name: extensiblity-destination-service
+    group: destinations
+    properties:
+      forwardAuthToken: false
+      name: ui5
+      url: https://ui5.sap.com
+  provides:
+  - name: app-api
+    properties:
+      app-protocol: ${protocol}
+      app-uri: ${default-uri}
+  parameters:
+    disk-quota: 256M
+    keep-existing-routes: true
+    memory: 256M
+- name: extensiblity-app-deployer
+  type: com.sap.application.content
+  path: gen
+  requires:
+  - name: extensiblity-html5-repo-host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: app/
+    requires:
+    - artifacts:
+      - project1.zip
+      name: extensiblityproject1
+      target-path: app/
+    - artifacts:
+      - project1.zip
+      name: project1
+      target-path: app//
+- name: extensiblityproject1
+  type: html5
+  path: app/project1
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+- name: project1
+  type: html5
+  path: app/project1
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: extensiblity-db
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: service-manager
+    service-plan: container
+- name: extensiblity-registry
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      appName: extensiblity-${org}-${space}
+      appUrls:
+        callbackTimeoutMillis: 300000
+        getDependencies: ~{mtx-api/mtx-url}/-/cds/saas-provisioning/dependencies
+        onSubscription: ~{mtx-api/mtx-url}/-/cds/saas-provisioning/tenant/{tenantId}
+        onSubscriptionAsync: true
+        onUnSubscriptionAsync: true
+        onUpdateDependenciesAsync: true
+      category: Category
+      description: A simple CAP project.
+      displayName: extensiblity
+      xsappname: extensiblity-${org}-${space}
+    service: saas-registry
+    service-plan: application
+  requires:
+  - name: mtx-api
+- name: extensiblity-auth
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      tenant-mode: shared
+      xsappname: extensiblity-${org}-${space}
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: extensiblity-html5-repo-host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-plan: app-host
+- name: extensiblity-html5-runtime
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-plan: app-runtime
+- name: extensiblity-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: false
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          - Authentication: NoAuthentication
+            HTML5.DynamicDestination: true
+            HTML5.ForwardAuthToken: true
+            Name: extensiblity-srv-api
+            ProxyType: Internet
+            Type: HTTP
+            URL: ~{srv-api/srv-url}
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: extensiblity-destination-service
+    service-plan: lite
+  requires:
+  - name: srv-api
 parameters:
+  deploy_mode: html5-repo
   enable-parallel-deployments: true
 build-parameters:
   before-all:
-    - builder: custom
-      commands:
-        - npm ci
-        - npx cds build --production
-modules:
-  - name: extensiblity-srv
-    type: nodejs
-    path: gen/srv
-    parameters:
-      buildpack: nodejs_buildpack
-      readiness-health-check-type: http
-      readiness-health-check-http-endpoint: /health
-    build-parameters:
-      builder: npm
-    provides:
-      - name: srv-api # required by consumers of CAP services (e.g. approuter)
-        properties:
-          srv-url: ${default-url}
-    requires:
-      - name: extensiblity-db
-      - name: extensiblity-auth
-
-  - name: extensiblity-mtx
-    type: nodejs
-    path: gen/mtx/sidecar
-    build-parameters:
-      builder: npm-ci
-    parameters:
-      memory: 256M
-      disk-quota: 512M
-    provides:
-      - name: mtx-api
-        properties:
-          mtx-url: ${default-url}
-    requires:
-      - name: extensiblity-auth
-      - name: extensiblity-registry
-      - name: app-api
-        properties:
-          SUBSCRIPTION_URL: ~{app-protocol}://\${tenant_subdomain}-~{app-uri}
-      - name: extensiblity-db
-
-  - name: extensiblity
-    type: approuter.nodejs
-    path: app/router
-    parameters:
-      keep-existing-routes: true
-      disk-quota: 256M
-      memory: 256M
-    properties:
-      TENANT_HOST_PATTERN: "^(.*)-${default-uri}"
-    requires:
-      - name: srv-api
-        group: destinations
-        properties:
-          name: srv-api # must be used in xs-app.json as well
-          url: ~{srv-url}
-          forwardAuthToken: true
-      - name: mtx-api
-        group: destinations
-        properties:
-          name: mtx-api # must be used in xs-app.json as well
-          url: ~{mtx-url}
-      - name: extensiblity-auth
-    provides:
-      - name: app-api
-        properties:
-          app-protocol: ${protocol}
-          app-uri: ${default-uri}
-
-resources:
-  - name: extensiblity-db
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: service-manager
-      service-plan: container
-  - name: extensiblity-registry
-    type: org.cloudfoundry.managed-service
-    requires:
-      - name: mtx-api
-    parameters:
-      service: saas-registry
-      service-plan: application
-      config:
-        xsappname: extensiblity-${org}-${space}
-        appName: extensiblity-${org}-${space}
-        displayName: extensiblity
-        description: A simple CAP project.
-        category: 'Category'
-        appUrls:
-          getDependencies: ~{mtx-api/mtx-url}/-/cds/saas-provisioning/dependencies
-          onSubscription: ~{mtx-api/mtx-url}/-/cds/saas-provisioning/tenant/{tenantId}
-          onSubscriptionAsync: true
-          onUnSubscriptionAsync: true
-          onUpdateDependenciesAsync: true
-          callbackTimeoutMillis: 300000 # Increase if your deployments are taking longer than that
-  - name: extensiblity-auth
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: xsuaa
-      service-plan: application
-      path: ./xs-security.json
-      config:
-        xsappname: extensiblity-${org}-${space}
-        tenant-mode: shared
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production

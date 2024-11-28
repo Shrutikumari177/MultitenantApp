@@ -17,6 +17,9 @@
     "server": {
       "index": true
     },
-    "profile": "mtx-sidecar"
+    "profile": "mtx-sidecar",
+    "requires": {
+      "html5-repo": true
+    }
   }
 }
